@@ -1,0 +1,40 @@
+#! /bin/bash
+
+REGION=ap-south-1
+
+while getopts "hr:" OPTION
+do
+	case $OPTION in
+	r)
+    		REGION=$OPTARG
+    		;;
+	h)
+    		echo "RDS-SHELL"
+    		echo -e "  -r,   Set Region.         Default: $REGION"
+    		exit
+    		;;
+	esac
+done
+
+echo -e Welcome to RDS-SHELL
+
+aws rds describe-db-clusters --region $REGION | jq -r '[ .DBClusters | .[] | { Username: .MasterUsername, Endpoint: .Endpoint, Status: .Status, Engine: .Engine, ClusterName: .DBClusterIdentifier, Port: .Port }] | to_entries | map(.value.Id = (1+.key) ) | map(.value) | map(.Id, .ClusterName, .Endpoint[0:-29]+"...", .Port, .Engine, .Status ) | @csv' | sed 's/"//g' | sed 's/,*$//g' | sed 's/^,\(.*\)/\1/' | awk -F "\"*,\"*" '{ printf ("%s %s %s %s %s %s\n", $1, $2, $3, $4, $5, $6) }' | column -t
+
+printf "Select the ID of the database to access, followed by [ENTER]: "
+read SELECTION
+
+SELECTION=$SELECTION-1
+INSTANCE=$( aws rds describe-db-clusters --region $REGION | jq -r '[ .DBClusters | .[] | { Username: .MasterUsername, Endpoint: .Endpoint, Status: .Status, Engine: .Engine, ClusterName: .DBClusterIdentifier, Port: .Port }] | .['$SELECTION']')
+ENDPOINT=$( echo $INSTANCE | jq -r .Endpoint )
+PORT=$( echo $INSTANCE | jq -r .Port )
+USERNAME=$( echo $INSTANCE | jq -r .Username )
+ENGINE=$( echo $INSTANCE | jq -r .Engine )
+
+case $ENGINE in
+	aurora-mysql)
+		mysql --user=$USERNAME --password --host=$ENDPOINT --port=$PORT
+		;;
+	mysql)
+		mysql --user=$USERNAME --password --host=$ENDPOINT --port=$PORT
+		;;
+esac
